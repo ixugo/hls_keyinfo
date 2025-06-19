@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"slices"
 )
 
@@ -12,10 +13,11 @@ var _ io.WriterTo = &KeyInfo{}
 
 // KeyInfo HLS加密信息结构
 type KeyInfo struct {
-	URL     string // 密钥获取URL
-	KeyFile string // 密钥文件路径
-	IV      string // 初始化向量
-	key     []byte // 密钥字节数组（小写私有属性）
+	URL      string // 密钥获取URL
+	KeyFile  string // 密钥文件路径
+	IV       string // 初始化向量
+	key      []byte // 密钥字节数组（小写私有属性）
+	infoFile string // 临时 keyinfo 文件路径（小写私有属性）
 }
 
 // NewKeyInfo 创建新的KeyInfo实例
@@ -85,27 +87,58 @@ func (k *KeyInfo) RandIV() *KeyInfo {
 
 // Dispose 清理临时文件
 func (k *KeyInfo) Dispose() error {
+	var errs []error
+
+	// 清理密钥文件
 	if k.KeyFile != "" {
 		if err := os.Remove(k.KeyFile); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("删除临时密钥文件失败: %w", err)
+			errs = append(errs, fmt.Errorf("删除临时密钥文件失败: %w", err))
 		}
 		k.KeyFile = ""
 	}
+
+	// 清理 keyinfo 文件
+	if k.infoFile != "" {
+		if err := os.Remove(k.infoFile); err != nil && !os.IsNotExist(err) {
+			errs = append(errs, fmt.Errorf("删除临时 keyinfo 文件失败: %w", err))
+		}
+		k.infoFile = ""
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("清理临时文件时发生错误: %v", errs)
+	}
+
 	return nil
 }
 
-// WriteToFile 直接写入到指定文件路径，强制覆盖
-func (k *KeyInfo) WriteToFile(filePath string) error {
-	// 创建或覆盖文件
-	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
-	if err != nil {
-		return fmt.Errorf("创建文件失败: %w", err)
+// WriteToTempFile 将 keyinfo 信息写入临时文件，返回临时文件路径
+// 使用密钥的十六进制表示作为文件名，确保唯一性和可识别性
+func (k *KeyInfo) WriteToTempFile() (string, error) {
+	if k.key == nil {
+		return "", fmt.Errorf("密钥未初始化")
 	}
-	defer file.Close()
 
-	// 写入内容
-	_, err = k.WriteTo(file)
-	return err
+	// 使用密钥的十六进制表示作为文件名
+	fileName := "hls_keyinfo_*.txt"
+	filePath := filepath.Join(os.TempDir(), fileName)
+
+	// 创建文件（如果已存在则覆盖）
+	tempFile, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		return "", fmt.Errorf("创建临时文件失败: %w", err)
+	}
+	defer tempFile.Close()
+
+	// 写入 keyinfo 内容
+	_, err = k.WriteTo(tempFile)
+	if err != nil {
+		return "", fmt.Errorf("写入临时文件失败: %w", err)
+	}
+
+	// 记录临时文件路径
+	k.infoFile = filePath
+	return filePath, nil
 }
 
 // WriteTo 实现io.WriterTo接口，按照ffmpeg hls_key_info_file格式写入三行数据

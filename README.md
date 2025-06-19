@@ -51,11 +51,12 @@ func main() {
         panic(err)
     }
 
-    // 方法2: 使用 WriteToFile 直接写入文件（推荐）
-    err = k.WriteToFile("keyinfo.txt")
+    // 方法2: 使用 WriteToTempFile 写入临时文件（推荐）
+    tempFilePath, err := k.WriteToTempFile()
     if err != nil {
         panic(err)
     }
+    defer os.Remove(tempFilePath) // 清理临时文件
 }
 ```
 
@@ -103,6 +104,11 @@ http://localhost:4123/keyinfo
 2. **第二行**: 密钥文件的本地路径
 3. **第三行**: 初始化向量 (IV)，可选
 
+## 文件命名规则
+
+- **密钥文件**: `hls_key_*.bin` - 存储实际的 16 字节密钥，`*` 为随机数字
+- **keyinfo 文件**: `hls_keyinfo_*.txt` - 存储 keyinfo 配置信息
+
 ## API 文档
 
 ### 函数
@@ -128,8 +134,8 @@ http://localhost:4123/keyinfo
 #### `WriteTo(w io.Writer) (n int64, err error)`
 实现 `io.WriterTo` 接口，将 keyinfo 内容写入到 Writer。
 
-#### `WriteToFile(filePath string) error`
-直接写入到指定文件路径，强制覆盖现有文件。
+#### `WriteToTempFile() (string, error)`
+将 keyinfo 信息写入临时文件，返回临时文件路径。
 
 ## FFmpeg 集成示例
 

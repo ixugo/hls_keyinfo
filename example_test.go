@@ -118,7 +118,7 @@ func TestDispose(t *testing.T) {
 	}
 }
 
-func TestWriteToFile(t *testing.T) {
+func TestWriteToTempFile(t *testing.T) {
 	k, err := NewKeyInfo("http://localhost:4123/keyinfo")
 	if err != nil {
 		t.Fatalf("创建 KeyInfo 失败: %v", err)
@@ -129,23 +129,25 @@ func TestWriteToFile(t *testing.T) {
 	k.SetIV("abcdef1234567890abcdef1234567890")
 
 	// 写入到临时文件
-	tempFile := "test_keyinfo.txt"
-	defer os.Remove(tempFile) // 测试完成后清理
-
-	err = k.WriteToFile(tempFile)
+	tempFilePath, err := k.WriteToTempFile()
 	if err != nil {
-		t.Fatalf("WriteToFile 失败: %v", err)
+		t.Fatalf("WriteToTempFile 失败: %v", err)
+	}
+
+	// 验证返回的路径不为空
+	if tempFilePath == "" {
+		t.Error("返回的临时文件路径为空")
 	}
 
 	// 验证文件是否存在
-	if _, err := os.Stat(tempFile); os.IsNotExist(err) {
-		t.Error("文件未创建")
+	if _, err := os.Stat(tempFilePath); os.IsNotExist(err) {
+		t.Error("临时文件未创建")
 	}
 
 	// 读取文件内容并验证
-	content, err := os.ReadFile(tempFile)
+	content, err := os.ReadFile(tempFilePath)
 	if err != nil {
-		t.Fatalf("读取文件失败: %v", err)
+		t.Fatalf("读取临时文件失败: %v", err)
 	}
 
 	lines := strings.Split(strings.TrimSpace(string(content)), "\n")
@@ -161,21 +163,57 @@ func TestWriteToFile(t *testing.T) {
 		t.Errorf("第三行不匹配，期望: abcdef1234567890abcdef1234567890，实际: %s", lines[2])
 	}
 
-	// 测试覆盖写入
-	k.SetIV("111222333444555666777888999000aa")
-	err = k.WriteToFile(tempFile)
+	// 测试多次调用返回相同的临时文件（因为密钥相同）
+	tempFilePath2, err := k.WriteToTempFile()
 	if err != nil {
-		t.Fatalf("第二次 WriteToFile 失败: %v", err)
+		t.Fatalf("第二次 WriteToTempFile 失败: %v", err)
 	}
 
-	// 验证文件被覆盖
-	content, err = os.ReadFile(tempFile)
+	if tempFilePath != tempFilePath2 {
+		t.Error("相同密钥多次调用 WriteToTempFile 应该返回相同的文件路径")
+	}
+
+	// 测试修改 IV 后重新写入
+	k.SetIV("111222333444555666777888999000aa")
+	tempFilePath3, err := k.WriteToTempFile()
 	if err != nil {
-		t.Fatalf("读取覆盖后的文件失败: %v", err)
+		t.Fatalf("修改 IV 后 WriteToTempFile 失败: %v", err)
+	}
+
+	if tempFilePath != tempFilePath3 {
+		t.Error("修改 IV 后应该返回相同的文件路径")
+	}
+
+	// 验证文件内容已更新
+	content, err = os.ReadFile(tempFilePath3)
+	if err != nil {
+		t.Fatalf("读取更新后的临时文件失败: %v", err)
 	}
 
 	lines = strings.Split(strings.TrimSpace(string(content)), "\n")
 	if lines[2] != "111222333444555666777888999000aa" {
-		t.Errorf("覆盖后第三行不匹配，期望: 111222333444555666777888999000aa，实际: %s", lines[2])
+		t.Errorf("更新后第三行不匹配，期望: 111222333444555666777888999000aa，实际: %s", lines[2])
+	}
+
+	// 测试不同密钥生成不同文件
+	k2, err := NewKeyInfo("http://localhost:4123/keyinfo")
+	if err != nil {
+		t.Fatalf("创建第二个 KeyInfo 失败: %v", err)
+	}
+	defer k2.Dispose()
+
+	tempFilePath4, err := k2.WriteToTempFile()
+	if err != nil {
+		t.Fatalf("第二个实例 WriteToTempFile 失败: %v", err)
+	}
+
+	if tempFilePath == tempFilePath4 {
+		t.Error("不同密钥应该生成不同的文件路径")
+	}
+
+	// 验证 Dispose 能正确清理所有临时文件
+	k.Dispose()
+	if _, err := os.Stat(tempFilePath); !os.IsNotExist(err) {
+		t.Error("Dispose 后临时文件应该被删除")
 	}
 }
