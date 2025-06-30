@@ -56,7 +56,9 @@ func main() {
     if err != nil {
         panic(err)
     }
-    defer os.Remove(tempFilePath) // 清理临时文件
+
+    // 获取解码秘钥
+    _ = k.GetKey()
 }
 ```
 
